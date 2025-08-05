@@ -149,7 +149,7 @@ pac_df
 # cluster stablity and is in good agreement with histological types of tumors in the dataset tested.  
 
 ```
-** Note! ** After examining PAC tables generated with top 500, 1000, 2000, 3000, and 5000 most variable genes, the lowest PAC outside of K > 2 
+**Note!** After examining PAC tables generated with top 500, 1000, 2000, 3000, and 5000 most variable genes, the lowest PAC outside of K > 2 
 was observed in K = 4 with top 1000 genes. Further fine-tuning was done with 1000 most variable genes (based on MAD). I rejected K = 2 cluster structure based on 
 biological irrelevance, since dataset contained multiple tumor types.
 
@@ -196,7 +196,7 @@ write.csv(score_tbl, file = "PAC_grid_test.csv", row.names = F)
 # best PAC, which remains 0.14 at K = 4
 
 ```
-** Note! ** Searching parameter combinations established 4 cluster structure with "pearson" correlation and hierarchical
+**Note!** Searching parameter combinations established 4 cluster structure with "pearson" correlation and hierarchical
 clustering as most stable. We will continue the analysis using this structure.
 
 ## 6. Extract cluster labels
@@ -255,7 +255,7 @@ cramersV <- sqrt(hist_chi$statistic /
                  (sum(hist_tab) * (min(dim(hist_tab)) - 1)))
 ```
 
-*(Cramer’s V ≈ 0.74 indicates strong association.). Very high significance in Chi square test*
+_(Cramer’s V ≈ 0.74 indicates strong association.). Very high significance in Chi square test_
 
 ### Plot 100 % stacked bars
 
@@ -268,7 +268,7 @@ ggplot(metadata_aug, aes(factor(Cluster), fill = Histology_abbr)) +
        title = "Histology distribution across clusters") +
   theme_bw()
 ```
-# Identify which histology-cluster pair drives the signal
+### Identify which histology-cluster pair drives the signal
 ```r
 std_res <- chisq_res$stdres   # standardised Pearson residuals
 round(std_res, 2)
