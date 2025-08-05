@@ -153,41 +153,80 @@ pac_df
 was observed in K = 4 with top 1000 genes. Further fine-tuning was done with 1000 most variable genes (based on MAD). I rejected K = 2 cluster structure based on 
 biological irrelevance, since dataset contained multiple tumor types.
 
-## 5.  
+## 5. Test various combinations of clustering parameters
+Create parameters grid to form different combinations of clustering algorithms and distance metrics.
+```r
+# Create parameters grid
+algs   <- c("hc", "hc", "hc", "km", "pam")
+dists  <- c("pearson","spearman","euclidean" ,"euclidean","pearson")
+labels <- LETTERS[1:6]
 
+results <- vector("list", length(algs))
+names(results) <- labels
 
+# Iterate over combinations of parameters and apply consensus clustering
+# We use top 1000 variable genes since we established that at this gene number
+# threshold provides most stable cluster structure
+for (i in seq_along(algs)) {
+  cat("Running", labels[i], algs[i], dists[i], "...\n")
+  mat <- if (dists[i] == "euclidean") t(scale(t(expr1000))) else expr1000
+  results[[i]] <- ConsensusClusterPlus(as.matrix(mat),
+                                       maxK = 7, reps = 1000,
+                                       pItem = 0.80, pFeature = 1,
+                                       clusterAlg = algs[i], distance = dists[i],
+                                       seed = 42, plot = NULL)
+}
 
+# Calculate PAC
+PAC <- function(M, lo = 0.10, hi = 0.90) {
+  F <- ecdf(M[upper.tri(M)]); F(hi) - F(lo)
+}
 
-## 6  Extract cluster labels
+# Aggregate PAC scores for each set of parameter combinations
+score_tbl <- do.call(rbind, lapply(labels, \(lab) {
+  pac <- sapply(results[[lab]][2:5], \(x) PAC(x$consensusMatrix))
+  data.frame(Method = lab, K = 2:5, PAC = pac)
+}))
+print(score_tbl)
 
->  Pulls the final cluster assignment vector for K = 4 and saves it.\
-> **Why**  Downstream analyses (silhouette, histology, survival) need these labels.
+score_tbl$method_combo <- paste(algs, dists, sep = "_")
+write.csv(score_tbl, file = "PAC_grid_test.csv", row.names = F)
+
+# Comnbination of distance measure based on pearson correlation and hierarchical clustering still provides the
+# best PAC, which remains 0.14 at K = 4
+
+```
+** Note! ** Searching parameter combinations established 4 cluster structure with "pearson" correlation and hierarchical
+clustering as most stable. We will continue the analysis using this structure.
+
+## 6. Extract cluster labels
+
+>  Pulls the final cluster assignment vector for K = 4 and saves it.
+>  Downstream analyses (silhouette, histology, survival) need these labels.
 
 ```r
 clusters <- cc_final[[4]]$consensusClass   # named by SampleID
 write_tsv(tibble(SampleID = names(clusters),
                  Cluster   = clusters),
-          "NSCLC_subtypes_K4.tsv")
+          "Subtypes_K4.tsv")
 ```
 
 ---
 
-## 6  Stability diagnostics
+## 7. Stability diagnostics
 
-\### 6.1 Silhouette
+### 6.1 Silhouette
 
-> **What**  Measures how well each sample fits within its cluster.\
-> **Why**  PAC summarises pairwise stability; silhouette gives a geometry‑based view.
+> Measures how well each sample fits within its cluster.
+> PAC summarises pairwise stability; silhouette gives a geometry‑based view.
 
 ```r
-diss_pears <- as.dist(1 - cor(expr_sel, method = "pearson"))
 diss_spear <- as.dist(1 - cor(expr_sel, method = "spearman"))
 
-sil_p  <- silhouette(clusters, diss_pears)   # mean ≈ 0.15 (weak)
 sil_sp <- silhouette(clusters, diss_spear)   # mean ≈ 0.24 (borderline‑good)
 ```
 
-\### 6.2 Plot silhouette (Spearman)
+### 6.2 Plot silhouette (Spearman)
 
 ```r
 png("silhouette_K4_spearman.png", 1600, 900, res = 180)
@@ -198,29 +237,27 @@ fviz_silhouette(sil_sp,
   labs(title = "Silhouette (K = 4, Spearman distance)")
 dev.off()
 ```
+## 8. Integrate clusters with metadata
 
----
-
-## 7  Integrate clusters with metadata
-
-> **What**  Adds cluster labels to metadata, then tests independence between clusters and categorical variables (histology, stage).\
-> **Why**  Validates biological relevance and reveals enrichments.
+> Added cluster labels to metadata and tested independence between clusters and categorical variables (histology, stage).
+> Validates biological relevance and reveals enrichments.
 
 ```r
+# Added cluster memberships to the metadata tables
 metadata_aug <- metadata %>%
   left_join(read_csv("histology_lookup.csv"), by = "Histology") %>%
   mutate(Cluster = clusters[ SampleID ])
 
-# χ² test: Cluster × Histology
+# Chi square test: Cluster × Histology
 hist_tab <- table(metadata_aug$Cluster, metadata_aug$Histology_abbr)
 hist_chi <- chisq.test(hist_tab)
 cramersV <- sqrt(hist_chi$statistic /
                  (sum(hist_tab) * (min(dim(hist_tab)) - 1)))
 ```
 
-*(Cramer’s V ≈ 0.74 → strong association.)*
+*(Cramer’s V ≈ 0.74 indicates strong association.). Very high significance in Chi square test*
 
-\### Plot 100 % stacked bars
+### Plot 100 % stacked bars
 
 ```r
 ggplot(metadata_aug, aes(factor(Cluster), fill = Histology_abbr)) +
@@ -231,13 +268,19 @@ ggplot(metadata_aug, aes(factor(Cluster), fill = Histology_abbr)) +
        title = "Histology distribution across clusters") +
   theme_bw()
 ```
+# Identify which histology-cluster pair drives the signal
+```r
+std_res <- chisq_res$stdres   # standardised Pearson residuals
+round(std_res, 2)
+```
+Use the same type analysis to examine the association between stage and clusters.
 
 ---
 
-## 8  Pretty consensus matrix
+## 8. Create consensus matrix
 
-> **What**  Visualises the 4×4 consensus matrix with annotations (cluster, histology, stage).\
-> **Why**  Easy‑to‑read figure for manuscripts; highlights crisp diagonal blocks.
+> Visualise the 4×4 consensus matrix with annotations (cluster, histology, stage).
+> Easy‑to‑read figure for manuscripts; highlights crisp diagonal blocks.
 
 ```r
 M <- cc_final[[4]]$consensusMatrix
@@ -251,3 +294,6 @@ ha <- HeatmapAnnotation(
     Cluster   = brewer.pal(4
 
 ```
+
+
+
